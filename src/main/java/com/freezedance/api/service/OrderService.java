@@ -5,6 +5,7 @@ import com.freezedance.api.dto.response.OrderResponse;
 import com.freezedance.api.exception.BadRequestException;
 import com.freezedance.api.exception.ResourceNotFoundException;
 import com.freezedance.api.model.*;
+import com.freezedance.api.model.enums.OrderStatus;
 import com.freezedance.api.repository.AddressRepository;
 import com.freezedance.api.repository.CartRepository;
 import com.freezedance.api.repository.OrderRepository;
@@ -43,37 +44,42 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
-        Address shippingAddress = addressRepository.findById(request.getShippingAddressId())
-                .orElseThrow(() -> new ResourceNotFoundException("Shipping address not found with id: " + request.getShippingAddressId()));
+        Address address = addressRepository.findById(request.getAddressId())
+                .orElseThrow(() -> new ResourceNotFoundException("Address not found with id: " + request.getAddressId()));
 
         Order order = new Order();
         order.setUser(user);
         order.setOrderNumber(generateOrderNumber());
         order.setStatus(OrderStatus.PENDING);
-        order.setShippingAddress(shippingAddress);
-        order.setPaymentMethod(request.getPaymentMethod());
+        order.setAddress(address);
+        order.setNotes(request.getNotes());
 
         List<OrderItem> orderItems = cart.getItems().stream().map(cartItem -> {
             OrderItem orderItem = new OrderItem();
             orderItem.setOrder(order);
             orderItem.setProduct(cartItem.getProduct());
             orderItem.setVariant(cartItem.getVariant());
+            orderItem.setProductName(cartItem.getProduct().getName());
+            orderItem.setWeightGrams(cartItem.getVariant().getWeightGrams());
             orderItem.setQuantity(cartItem.getQuantity());
-            orderItem.setPrice(cartItem.getPrice());
-            orderItem.setSubtotal(cartItem.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity())));
+            orderItem.setUnitPrice(cartItem.getVariant().getPrice());
+            orderItem.setTotalPrice(cartItem.getVariant().getPrice()
+                    .multiply(BigDecimal.valueOf(cartItem.getQuantity())));
             return orderItem;
         }).collect(Collectors.toList());
 
         order.setItems(orderItems);
 
-        BigDecimal totalAmount = orderItems.stream()
-                .map(OrderItem::getSubtotal)
+        BigDecimal subtotal = orderItems.stream()
+                .map(OrderItem::getTotalPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        order.setTotalAmount(totalAmount);
+        order.setSubtotal(subtotal);
+        order.setShippingFee(BigDecimal.ZERO);
+        order.setDiscountAmount(BigDecimal.ZERO);
+        order.setTotalAmount(subtotal);
 
         Order saved = orderRepository.save(order);
 
-        // Clear cart after order creation
         cart.getItems().clear();
         cartRepository.save(cart);
 
@@ -82,7 +88,7 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public Page<OrderResponse> getUserOrders(Long userId, Pageable pageable) {
-        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
+        return orderRepository.findByUserId(userId, pageable)
                 .map(this::mapToResponse);
     }
 
@@ -94,17 +100,24 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponse updateOrderStatus(Long orderId, OrderStatus status) {
+    public OrderResponse updateOrderStatus(Long orderId, OrderStatus status,
+                                           String trackingNumber, String trackingUrl) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
         order.setStatus(status);
-        Order saved = orderRepository.save(order);
-        return mapToResponse(saved);
+        if (trackingNumber != null) order.setTrackingNumber(trackingNumber);
+        if (trackingUrl != null) order.setTrackingUrl(trackingUrl);
+        return mapToResponse(orderRepository.save(order));
     }
 
     @Transactional(readOnly = true)
     public Page<OrderResponse> getAllOrders(Pageable pageable) {
         return orderRepository.findAll(pageable).map(this::mapToResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> getOrdersByStatus(OrderStatus status, Pageable pageable) {
+        return orderRepository.findByStatus(status, pageable).map(this::mapToResponse);
     }
 
     @Transactional
@@ -121,8 +134,7 @@ public class OrderService {
         }
 
         order.setStatus(OrderStatus.CANCELLED);
-        Order saved = orderRepository.save(order);
-        return mapToResponse(saved);
+        return mapToResponse(orderRepository.save(order));
     }
 
     private String generateOrderNumber() {
@@ -134,33 +146,53 @@ public class OrderService {
     private OrderResponse mapToResponse(Order order) {
         List<OrderResponse.OrderItemResponse> itemResponses = order.getItems().stream().map(item ->
                 OrderResponse.OrderItemResponse.builder()
-                        .id(item.getId())
-                        .productId(item.getProduct().getId())
-                        .productName(item.getProduct().getName())
-                        .productSlug(item.getProduct().getSlug())
-                        .productImage(item.getProduct().getImages() != null && !item.getProduct().getImages().isEmpty()
-                                ? item.getProduct().getImages().get(0).getUrl() : null)
-                        .variantId(item.getVariant() != null ? item.getVariant().getId() : null)
-                        .variantSize(item.getVariant() != null ? item.getVariant().getSize() : null)
-                        .variantColor(item.getVariant() != null ? item.getVariant().getColor() : null)
+                        .productName(item.getProductName())
+                        .weightGrams(item.getWeightGrams())
                         .quantity(item.getQuantity())
-                        .price(item.getPrice())
-                        .subtotal(item.getSubtotal())
+                        .unitPrice(item.getUnitPrice())
+                        .totalPrice(item.getTotalPrice())
                         .build()
         ).collect(Collectors.toList());
+
+        OrderResponse.AddressInfo addressInfo = null;
+        if (order.getAddress() != null) {
+            Address a = order.getAddress();
+            addressInfo = OrderResponse.AddressInfo.builder()
+                    .fullName(a.getFullName())
+                    .phone(a.getPhone())
+                    .addressLine1(a.getAddressLine1())
+                    .addressLine2(a.getAddressLine2())
+                    .city(a.getCity())
+                    .state(a.getState())
+                    .pincode(a.getPincode())
+                    .build();
+        }
+
+        OrderResponse.PaymentInfo paymentInfo = null;
+        if (order.getPayment() != null) {
+            Payment p = order.getPayment();
+            paymentInfo = OrderResponse.PaymentInfo.builder()
+                    .razorpayPaymentId(p.getRazorpayPaymentId())
+                    .status(p.getStatus())
+                    .method(p.getMethod())
+                    .build();
+        }
 
         return OrderResponse.builder()
                 .id(order.getId())
                 .orderNumber(order.getOrderNumber())
-                .status(order.getStatus().name())
+                .status(order.getStatus())
+                .subtotal(order.getSubtotal())
+                .shippingFee(order.getShippingFee())
+                .discountAmount(order.getDiscountAmount())
                 .totalAmount(order.getTotalAmount())
-                .paymentMethod(order.getPaymentMethod())
-                .shippingAddressId(order.getShippingAddress() != null ? order.getShippingAddress().getId() : null)
+                .trackingNumber(order.getTrackingNumber())
+                .trackingUrl(order.getTrackingUrl())
+                .notes(order.getNotes())
+                .address(addressInfo)
+                .payment(paymentInfo)
                 .items(itemResponses)
-                .userId(order.getUser().getId())
-                .userName(order.getUser().getFirstName() + " " + order.getUser().getLastName())
                 .createdAt(order.getCreatedAt())
-                .updatedAt(order.getUpdatedAt())
                 .build();
     }
 }

@@ -4,8 +4,9 @@ import com.freezedance.api.dto.response.AnalyticsResponse;
 import com.freezedance.api.dto.response.ApiResponse;
 import com.freezedance.api.dto.response.OrderResponse;
 import com.freezedance.api.dto.response.ReviewResponse;
-import com.freezedance.api.model.OrderStatus;
 import com.freezedance.api.model.User;
+import com.freezedance.api.model.enums.OrderStatus;
+import com.freezedance.api.model.enums.Role;
 import com.freezedance.api.repository.UserRepository;
 import com.freezedance.api.service.AnalyticsService;
 import com.freezedance.api.service.OrderService;
@@ -59,7 +60,7 @@ public class AdminController {
 
     @GetMapping("/customers")
     public ResponseEntity<ApiResponse<Page<User>>> getCustomers(Pageable pageable) {
-        Page<User> customers = userRepository.findByRole("CUSTOMER", pageable);
+        Page<User> customers = userRepository.findByRole(Role.CUSTOMER, pageable);
         return ResponseEntity.ok(ApiResponse.success(customers));
     }
 

@@ -28,7 +28,7 @@ public class ReviewController {
     public ResponseEntity<ApiResponse<Page<ReviewResponse>>> getReviews(
             @PathVariable String slug,
             Pageable pageable) {
-        Page<ReviewResponse> reviews = reviewService.getApprovedReviews(slug, pageable);
+        Page<ReviewResponse> reviews = reviewService.getProductReviews(slug, pageable);
         return ResponseEntity.ok(ApiResponse.success(reviews));
     }
 
@@ -37,7 +37,7 @@ public class ReviewController {
             @PathVariable String slug,
             @RequestBody @Valid ReviewRequest request) {
         Long userId = getCurrentUserId();
-        ReviewResponse review = reviewService.submitReview(userId, slug, request);
+        ReviewResponse review = reviewService.createReview(userId, slug, request);
         return ResponseEntity.ok(ApiResponse.success("Review submitted for approval", review));
     }
 

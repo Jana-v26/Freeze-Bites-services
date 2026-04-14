@@ -29,7 +29,7 @@ public class ReviewService {
         Product product = productRepository.findBySlug(slug)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with slug: " + slug));
 
-        return reviewRepository.findByProductIdAndApprovedTrue(product.getId(), pageable)
+        return reviewRepository.findByProductIdAndIsApprovedTrue(product.getId(), pageable)
                 .map(this::mapToResponse);
     }
 
@@ -41,7 +41,7 @@ public class ReviewService {
         Product product = productRepository.findBySlug(slug)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with slug: " + slug));
 
-        boolean alreadyReviewed = reviewRepository.existsByUserIdAndProductId(userId, product.getId());
+        boolean alreadyReviewed = reviewRepository.existsByProductIdAndUserId(product.getId(), userId);
         if (alreadyReviewed) {
             throw new BadRequestException("You have already reviewed this product");
         }
@@ -52,18 +52,19 @@ public class ReviewService {
         review.setRating(request.getRating());
         review.setTitle(request.getTitle());
         review.setComment(request.getComment());
-        review.setApproved(false);
+        review.setIsApproved(false);
 
         Review saved = reviewRepository.save(review);
         return mapToResponse(saved);
     }
 
     @Transactional
-    public void approveReview(Long reviewId) {
+    public ReviewResponse approveReview(Long reviewId) {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Review not found with id: " + reviewId));
-        review.setApproved(true);
-        reviewRepository.save(review);
+        review.setIsApproved(true);
+        Review saved = reviewRepository.save(review);
+        return mapToResponse(saved);
     }
 
     private ReviewResponse mapToResponse(Review review) {
@@ -72,9 +73,9 @@ public class ReviewService {
                 .rating(review.getRating())
                 .title(review.getTitle())
                 .comment(review.getComment())
-                .approved(review.isApproved())
+                .approved(review.getIsApproved())
                 .userId(review.getUser().getId())
-                .userName(review.getUser().getFirstName() + " " + review.getUser().getLastName())
+                .userName(review.getUser().getFullName())
                 .productId(review.getProduct().getId())
                 .productName(review.getProduct().getName())
                 .createdAt(review.getCreatedAt())

@@ -35,8 +35,8 @@ public class UserController {
     public ResponseEntity<ApiResponse<User>> updateProfile(@RequestBody Map<String, String> updates) {
         User user = getCurrentUser();
 
-        if (updates.containsKey("name")) {
-            user.setName(updates.get("name"));
+        if (updates.containsKey("fullName")) {
+            user.setFullName(updates.get("fullName"));
         }
         if (updates.containsKey("phone")) {
             user.setPhone(updates.get("phone"));
@@ -58,7 +58,7 @@ public class UserController {
         User user = getCurrentUser();
         Address address = Address.builder()
                 .user(user)
-                .name(request.getName())
+                .fullName(request.getFullName())
                 .phone(request.getPhone())
                 .addressLine1(request.getAddressLine1())
                 .addressLine2(request.getAddressLine2())
@@ -83,7 +83,7 @@ public class UserController {
             throw new RuntimeException("Unauthorized access to address");
         }
 
-        address.setName(request.getName());
+        address.setFullName(request.getFullName());
         address.setPhone(request.getPhone());
         address.setAddressLine1(request.getAddressLine1());
         address.setAddressLine2(request.getAddressLine2());

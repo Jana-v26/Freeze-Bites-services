@@ -23,7 +23,8 @@ public class AnalyticsService {
 
     @Transactional(readOnly = true)
     public AnalyticsResponse getDashboardAnalytics() {
-        BigDecimal totalRevenue = orderRepository.findTotalRevenue();
+        LocalDateTime epoch = LocalDateTime.of(2000, 1, 1, 0, 0);
+        BigDecimal totalRevenue = orderRepository.totalRevenueSince(epoch);
         Long totalOrders = orderRepository.count();
         Long totalCustomers = userRepository.count();
         Long totalProducts = productRepository.count();
@@ -32,8 +33,8 @@ public class AnalyticsService {
                 .with(WeekFields.of(Locale.getDefault()).dayOfWeek(), 1)
                 .withHour(0).withMinute(0).withSecond(0).withNano(0);
 
-        BigDecimal revenueThisWeek = orderRepository.findRevenueAfter(startOfWeek);
-        Long ordersThisWeek = orderRepository.countByCreatedAtAfter(startOfWeek);
+        BigDecimal revenueThisWeek = orderRepository.totalRevenueSince(startOfWeek);
+        long ordersThisWeek = orderRepository.countOrdersSince(startOfWeek);
 
         return AnalyticsResponse.builder()
                 .totalRevenue(totalRevenue != null ? totalRevenue : BigDecimal.ZERO)
@@ -41,7 +42,7 @@ public class AnalyticsService {
                 .totalCustomers(totalCustomers)
                 .totalProducts(totalProducts)
                 .revenueThisWeek(revenueThisWeek != null ? revenueThisWeek : BigDecimal.ZERO)
-                .ordersThisWeek(ordersThisWeek != null ? ordersThisWeek : 0L)
+                .ordersThisWeek(ordersThisWeek)
                 .build();
     }
 }

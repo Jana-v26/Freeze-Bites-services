@@ -1,10 +1,12 @@
 package com.freezedance.api.service;
 
+import com.freezedance.api.dto.response.PaymentResponse;
 import com.freezedance.api.exception.BadRequestException;
 import com.freezedance.api.exception.ResourceNotFoundException;
 import com.freezedance.api.model.Order;
-import com.freezedance.api.model.OrderStatus;
 import com.freezedance.api.model.Payment;
+import com.freezedance.api.model.enums.OrderStatus;
+import com.freezedance.api.model.enums.PaymentStatus;
 import com.freezedance.api.repository.OrderRepository;
 import com.freezedance.api.repository.PaymentRepository;
 import com.razorpay.RazorpayClient;
@@ -16,8 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.Map;
 
 @Service
 public class PaymentService {
@@ -45,12 +45,11 @@ public class PaymentService {
     }
 
     @Transactional
-    public Map<String, Object> createRazorpayOrder(String orderNumber) {
+    public PaymentResponse createRazorpayOrder(String orderNumber) {
         Order order = orderRepository.findByOrderNumber(orderNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with number: " + orderNumber));
 
         try {
-            // Convert amount to paise (smallest currency unit)
             int amountInPaise = order.getTotalAmount().multiply(BigDecimal.valueOf(100)).intValue();
 
             JSONObject orderRequest = new JSONObject();
@@ -60,29 +59,27 @@ public class PaymentService {
 
             com.razorpay.Order razorpayOrder = razorpayClient.orders.create(orderRequest);
 
-            // Save payment record
             Payment payment = new Payment();
             payment.setOrder(order);
             payment.setRazorpayOrderId(razorpayOrder.get("id"));
             payment.setAmount(order.getTotalAmount());
             payment.setCurrency("INR");
-            payment.setStatus("CREATED");
+            payment.setStatus(PaymentStatus.CREATED);
             paymentRepository.save(payment);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("razorpayOrderId", razorpayOrder.get("id"));
-            response.put("amount", amountInPaise);
-            response.put("currency", "INR");
-            response.put("orderNumber", order.getOrderNumber());
-
-            return response;
+            return PaymentResponse.builder()
+                    .razorpayOrderId(razorpayOrder.get("id"))
+                    .amount(amountInPaise)
+                    .currency("INR")
+                    .orderNumber(order.getOrderNumber())
+                    .build();
         } catch (RazorpayException e) {
             throw new BadRequestException("Failed to create Razorpay order: " + e.getMessage());
         }
     }
 
     @Transactional
-    public boolean verifyPayment(String razorpayOrderId, String razorpayPaymentId, String razorpaySignature) {
+    public void verifyPayment(String razorpayOrderId, String razorpayPaymentId, String razorpaySignature) {
         try {
             JSONObject attributes = new JSONObject();
             attributes.put("razorpay_order_id", razorpayOrderId);
@@ -97,16 +94,13 @@ public class PaymentService {
 
                 payment.setRazorpayPaymentId(razorpayPaymentId);
                 payment.setRazorpaySignature(razorpaySignature);
-                payment.setStatus("PAID");
+                payment.setStatus(PaymentStatus.CAPTURED);
                 paymentRepository.save(payment);
 
-                // Update order status
                 Order order = payment.getOrder();
                 order.setStatus(OrderStatus.CONFIRMED);
                 orderRepository.save(order);
             }
-
-            return isValid;
         } catch (RazorpayException e) {
             throw new BadRequestException("Payment verification failed: " + e.getMessage());
         }
@@ -142,7 +136,7 @@ public class PaymentService {
             switch (event) {
                 case "payment.captured":
                     payment.setRazorpayPaymentId(razorpayPaymentId);
-                    payment.setStatus("CAPTURED");
+                    payment.setStatus(PaymentStatus.CAPTURED);
                     paymentRepository.save(payment);
 
                     Order order = payment.getOrder();
@@ -152,7 +146,7 @@ public class PaymentService {
 
                 case "payment.failed":
                     payment.setRazorpayPaymentId(razorpayPaymentId);
-                    payment.setStatus("FAILED");
+                    payment.setStatus(PaymentStatus.FAILED);
                     paymentRepository.save(payment);
 
                     Order failedOrder = payment.getOrder();

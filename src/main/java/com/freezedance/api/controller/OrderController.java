@@ -27,7 +27,7 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<ApiResponse<OrderResponse>> placeOrder(@RequestBody @Valid OrderRequest request) {
         Long userId = getCurrentUserId();
-        OrderResponse order = orderService.placeOrder(userId, request);
+        OrderResponse order = orderService.createOrder(userId, request);
         return ResponseEntity.ok(ApiResponse.success("Order placed successfully", order));
     }
 
@@ -41,7 +41,7 @@ public class OrderController {
     @GetMapping("/{orderNumber}")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrder(@PathVariable String orderNumber) {
         Long userId = getCurrentUserId();
-        OrderResponse order = orderService.getOrder(userId, orderNumber);
+        OrderResponse order = orderService.getOrderByNumber(orderNumber);
         return ResponseEntity.ok(ApiResponse.success(order));
     }
 

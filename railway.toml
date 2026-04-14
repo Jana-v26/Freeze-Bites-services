@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "./mvnw -DskipTests clean package -Pproduction"
+buildCommand = "chmod +x mvnw && ./mvnw -DskipTests clean package -Pproduction"
 
 [deploy]
 startCommand = "java -jar target/api-0.0.1-SNAPSHOT.jar"

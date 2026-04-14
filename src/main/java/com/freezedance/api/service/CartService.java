@@ -8,10 +8,12 @@ import com.freezedance.api.model.Cart;
 import com.freezedance.api.model.CartItem;
 import com.freezedance.api.model.Product;
 import com.freezedance.api.model.ProductVariant;
+import com.freezedance.api.model.User;
 import com.freezedance.api.repository.CartItemRepository;
 import com.freezedance.api.repository.CartRepository;
 import com.freezedance.api.repository.ProductRepository;
 import com.freezedance.api.repository.ProductVariantRepository;
+import com.freezedance.api.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,49 +31,45 @@ public class CartService {
     private final CartItemRepository cartItemRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository productVariantRepository;
+    private final UserRepository userRepository;
 
     @Transactional(readOnly = true)
     public CartResponse getCart(Long userId) {
-        Cart cart = cartRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    Cart newCart = new Cart();
-                    newCart.setUserId(userId);
-                    newCart.setItems(new ArrayList<>());
-                    return cartRepository.save(newCart);
-                });
-        return mapToResponse(cart);
+        return cartRepository.findByUserId(userId)
+                .map(this::mapToResponse)
+                .orElseGet(() -> CartResponse.builder()
+                        .items(new ArrayList<>())
+                        .totalAmount(BigDecimal.ZERO)
+                        .totalItems(0)
+                        .build());
     }
 
     @Transactional
     public CartResponse addItem(Long userId, CartItemRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+
         Cart cart = cartRepository.findByUserId(userId)
                 .orElseGet(() -> {
                     Cart newCart = new Cart();
-                    newCart.setUserId(userId);
-                    newCart.setItems(new ArrayList<>());
+                    newCart.setUser(user);
                     return cartRepository.save(newCart);
                 });
 
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + request.getProductId()));
 
-        ProductVariant variant = null;
-        if (request.getVariantId() != null) {
-            variant = productVariantRepository.findById(request.getVariantId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + request.getVariantId()));
+        ProductVariant variant = productVariantRepository.findById(request.getVariantId())
+                .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + request.getVariantId()));
 
-            if (variant.getStockQuantity() < request.getQuantity()) {
-                throw new BadRequestException("Insufficient stock for the selected variant");
-            }
+        if (variant.getStockQty() < request.getQuantity()) {
+            throw new BadRequestException("Insufficient stock for the selected variant");
         }
 
-        // Check if item already exists in cart
-        ProductVariant finalVariant = variant;
         CartItem existingItem = cart.getItems().stream()
                 .filter(item -> item.getProduct().getId().equals(request.getProductId())
-                        && (finalVariant == null
-                            ? item.getVariant() == null
-                            : finalVariant.getId().equals(item.getVariant() != null ? item.getVariant().getId() : null)))
+                        && item.getVariant() != null
+                        && item.getVariant().getId().equals(request.getVariantId()))
                 .findFirst()
                 .orElse(null);
 
@@ -83,12 +81,10 @@ public class CartService {
             newItem.setProduct(product);
             newItem.setVariant(variant);
             newItem.setQuantity(request.getQuantity());
-            newItem.setPrice(variant != null ? variant.getPrice() : product.getPrice());
             cart.getItems().add(newItem);
         }
 
-        Cart saved = cartRepository.save(cart);
-        return mapToResponse(saved);
+        return mapToResponse(cartRepository.save(cart));
     }
 
     @Transactional
@@ -105,13 +101,12 @@ public class CartService {
             throw new BadRequestException("Quantity must be greater than zero");
         }
 
-        if (item.getVariant() != null && item.getVariant().getStockQuantity() < quantity) {
+        if (item.getVariant() != null && item.getVariant().getStockQty() < quantity) {
             throw new BadRequestException("Insufficient stock for the selected variant");
         }
 
         item.setQuantity(quantity);
-        Cart saved = cartRepository.save(cart);
-        return mapToResponse(saved);
+        return mapToResponse(cartRepository.save(cart));
     }
 
     @Transactional
@@ -126,9 +121,7 @@ public class CartService {
 
         cart.getItems().remove(item);
         cartItemRepository.delete(item);
-
-        Cart saved = cartRepository.save(cart);
-        return mapToResponse(saved);
+        return mapToResponse(cartRepository.save(cart));
     }
 
     @Transactional
@@ -142,22 +135,26 @@ public class CartService {
     }
 
     private CartResponse mapToResponse(Cart cart) {
-        List<CartResponse.CartItemResponse> itemResponses = cart.getItems().stream().map(item ->
-                CartResponse.CartItemResponse.builder()
-                        .id(item.getId())
-                        .productId(item.getProduct().getId())
-                        .productName(item.getProduct().getName())
-                        .productSlug(item.getProduct().getSlug())
-                        .productImage(item.getProduct().getImages() != null && !item.getProduct().getImages().isEmpty()
-                                ? item.getProduct().getImages().get(0).getUrl() : null)
-                        .variantId(item.getVariant() != null ? item.getVariant().getId() : null)
-                        .variantSize(item.getVariant() != null ? item.getVariant().getSize() : null)
-                        .variantColor(item.getVariant() != null ? item.getVariant().getColor() : null)
-                        .quantity(item.getQuantity())
-                        .price(item.getPrice())
-                        .subtotal(item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
-                        .build()
-        ).collect(Collectors.toList());
+        List<CartResponse.CartItemResponse> itemResponses = cart.getItems().stream().map(item -> {
+            BigDecimal price = item.getVariant() != null
+                    ? item.getVariant().getPrice()
+                    : item.getProduct().getBasePrice();
+            BigDecimal subtotal = price.multiply(BigDecimal.valueOf(item.getQuantity()));
+            String imageUrl = item.getProduct().getImages() != null && !item.getProduct().getImages().isEmpty()
+                    ? item.getProduct().getImages().get(0).getImageUrl() : null;
+            return CartResponse.CartItemResponse.builder()
+                    .id(item.getId())
+                    .productId(item.getProduct().getId())
+                    .productName(item.getProduct().getName())
+                    .productSlug(item.getProduct().getSlug())
+                    .imageUrl(imageUrl)
+                    .variantId(item.getVariant() != null ? item.getVariant().getId() : null)
+                    .weightGrams(item.getVariant() != null ? item.getVariant().getWeightGrams() : null)
+                    .price(price)
+                    .quantity(item.getQuantity())
+                    .subtotal(subtotal)
+                    .build();
+        }).collect(Collectors.toList());
 
         BigDecimal totalAmount = itemResponses.stream()
                 .map(CartResponse.CartItemResponse::getSubtotal)
@@ -165,7 +162,6 @@ public class CartService {
 
         return CartResponse.builder()
                 .id(cart.getId())
-                .userId(cart.getUserId())
                 .items(itemResponses)
                 .totalAmount(totalAmount)
                 .totalItems(cart.getItems().size())
