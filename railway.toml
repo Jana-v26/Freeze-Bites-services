@@ -1,0 +1,13 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "./mvnw -DskipTests clean package -Pproduction"
+
+[deploy]
+startCommand = "java -jar target/api-0.0.1-SNAPSHOT.jar"
+healthcheckPath = "/api/products"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[environments.production.deploy]
+numReplicas = 1
