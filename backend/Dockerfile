@@ -1,11 +1,11 @@
 FROM eclipse-temurin:17-jdk AS build
 WORKDIR /app
 
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
+COPY backend/.mvn/ .mvn/
+COPY backend/mvnw backend/pom.xml ./
 RUN chmod +x mvnw && ./mvnw dependency:resolve -B -q
 
-COPY src/ src/
+COPY backend/src/ src/
 RUN ./mvnw -DskipTests clean package -B
 
 FROM eclipse-temurin:17-jre
